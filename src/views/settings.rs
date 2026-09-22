@@ -45,7 +45,7 @@ impl SettingsWindow {
 
         let window = WindowBuilder::default()
             .with_size(900, 800)
-            .with_title("Rusty Twinkle Tray Settings")
+            .with_title(crate::localization::strings().settings_title)
             .with_icon_resource(APP_ICON)
             .with_close_handler(cloned!([sender] move || sender
                                 .send(CustomEvent::CloseSettings)
@@ -188,11 +188,11 @@ impl SettingsWindow {
                 Ok(())
             }))?;
 
-        let general = section("General")?
+        let general = section(crate::localization::strings().general)?
             .with_child(
                 &StackPanel::horizontal()?
                     .with_child(&auto_start_toggle)?
-                    .with_child(&TextBlock::with_text("Automatically run on startup")?.with_vertical_alignment(VerticalAlignment::Center)?)?
+                    .with_child(&TextBlock::with_text(crate::localization::strings().run_on_startup)?.with_vertical_alignment(VerticalAlignment::Center)?)?
             )?
             .with_child(
                 &StackPanel::horizontal()?
@@ -208,15 +208,15 @@ impl SettingsWindow {
                             }))?
                     )?
                     .with_child(
-                        &TextBlock::with_text("Automatically restore saved brightness")?.with_vertical_alignment(VerticalAlignment::Center)?
+                        &TextBlock::with_text(crate::localization::strings().restore_saved_brightness)?.with_vertical_alignment(VerticalAlignment::Center)?
                     )?
             )?;
 
-        let controls = section("Controls")?
+        let controls = section(crate::localization::strings().controls)?
             .with_child(
             &StackPanel::horizontal()?
                 .with_child(&enable_icon_scroll)?
-                .with_child(&TextBlock::with_text("Adjust the brightness of all displays by scrolling over the tray icon")?
+                .with_child(&TextBlock::with_text(crate::localization::strings().icon_scroll)?
                     .with_vertical_alignment(VerticalAlignment::Center)?)?
             )?
             .with_child(
@@ -225,26 +225,26 @@ impl SettingsWindow {
                     .with_child(
                         &StackPanel::horizontal()?
                             .with_child(&hotkey_toggle)?
-                            .with_child(&TextBlock::with_text("Adjust the brightness of all displays by pressing the following hotkeys:")?
+                            .with_child(&TextBlock::with_text(crate::localization::strings().hotkeys_intro)?
                                 .with_vertical_alignment(VerticalAlignment::Center)?)?
                     )?
                     .with_child(
                         &StackPanel::horizontal()?
                             .with_child(&hotkey_increase)?
-                            .with_child(&TextBlock::with_text("Increase brightness")?
+                            .with_child(&TextBlock::with_text(crate::localization::strings().increase_brightness)?
                                 .with_vertical_alignment(VerticalAlignment::Center)?)?
                     )?
                     .with_child(
                         &StackPanel::horizontal()?
                             .with_child(&hotkey_decrease)?
-                            .with_child(&TextBlock::with_text("Decrease brightness")?
+                            .with_child(&TextBlock::with_text(crate::localization::strings().decrease_brightness)?
                                 .with_vertical_alignment(VerticalAlignment::Center)?)?
                     )?
             )?;
 
-        let monitors = section("Monitors")?
+        let monitors = section(crate::localization::strings().monitors)?
             .with_child(
-                &TextBlock::with_text("Rename your displays. Leave a field empty to use its default name.")?
+                &TextBlock::with_text(crate::localization::strings().monitors_hint)?
                     .with_font_size(14.0)?
             )?;
         match Monitor::find_all() {
@@ -257,15 +257,15 @@ impl SettingsWindow {
             }
             Err(e) => {
                 warn!("Failed to enumerate monitors for settings: {e}");
-                monitors.add_child(&TextBlock::with_text("Failed to detect monitors.")?)?;
+                monitors.add_child(&TextBlock::with_text(crate::localization::strings().failed_to_detect_monitors)?)?;
             }
         }
 
-        let advanced = section("Advanced")?.with_child(
+        let advanced = section(crate::localization::strings().advanced)?.with_child(
             &StackPanel::horizontal()?
                 .with_child(&autostart_priority_toggle)?
                 .with_child(
-                    &TextBlock::with_text("Use higher autostart priority (requires admin permissions)")?
+                    &TextBlock::with_text(crate::localization::strings().autostart_priority)?
                         .with_vertical_alignment(VerticalAlignment::Center)?
                 )?
         )?;

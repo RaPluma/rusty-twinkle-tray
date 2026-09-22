@@ -52,9 +52,6 @@ pub struct Monitor {
     internal: bool
 }
 
-/// Shown instead of the (missing) friendly name of an internal display.
-pub const INTERNAL_DISPLAY_NAME: &str = "Internal Display";
-
 impl Monitor {
     pub fn find_all() -> Result<Vec<Monitor>> {
         let monitors = find_all_gdi_monitors()?;
@@ -66,7 +63,7 @@ impl Monitor {
                 let gdi = get_gdi_name(&display)?;
                 let hmonitor = monitors.iter().find(|(n, _)| n == &gdi).some()?.1;
                 let internal = name.trim().is_empty() && internal::InternalBrightness::is_supported();
-                let name = if internal { INTERNAL_DISPLAY_NAME.to_string() } else { name };
+                let name = if internal { crate::localization::strings().internal_display.to_string() } else { name };
                 Ok(Monitor { name, path, hmonitor, internal })
             })
             .filter(|r| r

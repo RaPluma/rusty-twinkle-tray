@@ -25,6 +25,8 @@ pub struct Config {
     pub hotkey_step_size: f32,
     pub brightness_increase_hotkey: KeyCombination,
     pub brightness_decrease_hotkey: KeyCombination,
+    /// UI language: "auto" (follow the system), "en-US" or "zh-CN"
+    pub language: String,
     pub monitors: BTreeMap<MonitorPath, MonitorSettings>
 }
 
@@ -40,6 +42,7 @@ impl Default for Config {
             hotkey_step_size: 10.0,
             brightness_increase_hotkey: KeyCombination::from(([Modifier::Alt], VirtualKey::F1)),
             brightness_decrease_hotkey: KeyCombination::from(([Modifier::Alt], VirtualKey::F2)),
+            language: "auto".to_string(),
             monitors: Default::default(),
         }
     }
@@ -103,6 +106,7 @@ impl Config {
         write!(file, "HotkeyStepSize={}\r\n", self.hotkey_step_size)?;
         write!(file, "BrightnessIncreaseHotkey={}\r\n", self.brightness_increase_hotkey.display(false))?;
         write!(file, "BrightnessDecreaseHotkey={}\r\n", self.brightness_decrease_hotkey.display(false))?;
+        write!(file, "Language={}\r\n", self.language)?;
 
         write!(file, "\r\n")?;
 
@@ -164,6 +168,7 @@ impl Config {
                     "HotkeyStepSize" => self.hotkey_step_size = value.parse()?,
                     "BrightnessIncreaseHotkey" => self.brightness_increase_hotkey = value.parse()?,
                     "BrightnessDecreaseHotkey" => self.brightness_decrease_hotkey = value.parse()?,
+                    "Language" => self.language = value.to_string(),
                     _ => debug!("Ignoring unknown key in section {}: {}={}", section, key, value)
                 },
                 path if path.starts_with("\\\\?\\DISPLAY") => {

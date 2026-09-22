@@ -67,7 +67,7 @@ impl BrightnessFlyout {
     pub fn new(sender: Sender<CustomEvent>, colors: &ColorSet) -> Result<Self> {
         let settings = AppBarButton::new()?
             .with_icon(&FontIcon::new('\u{E713}')?)?
-            .with_label("Settings")?
+            .with_label(crate::localization::strings().settings)?
             //.with_enabled(false)?;
             .with_click_handler(cloned!([sender] move|| {
                 sender
@@ -78,7 +78,7 @@ impl BrightnessFlyout {
 
         let refresh = AppBarButton::new()?
             .with_icon(&FontIcon::new('\u{E72C}')?)?
-            .with_label("Refresh")?
+            .with_label(crate::localization::strings().refresh)?
             .with_click_handler(cloned!([sender] move || {
                 sender
                     .send(CustomEvent::Refresh)
@@ -92,7 +92,7 @@ impl BrightnessFlyout {
             .with_column_widths([GridSize::Fraction(1.0), GridSize::Auto])?
             .with_background(&SolidColorBrush::CreateInstanceWithColor(Color { R: 0, G: 0, B: 0, A: 70 })?)?
             .with_child(
-                &TextBlock::with_text("Adjust Brightness")?
+                &TextBlock::with_text(crate::localization::strings().adjust_brightness)?
                     .with_font_size(15.0)?
                     .with_vertical_alignment(VerticalAlignment::Center)?
                     .with_padding((20.0, 0.0, 0.0, 0.0))?,

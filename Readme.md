@@ -33,6 +33,16 @@ internal brightness interface is available, so machines without such a panel are
 unaffected. If the display driver doesn't expose the interface (some hybrid GPU setups
 hide it), the panel simply keeps behaving like before.
 
+## Language
+The UI is available in English and Chinese. The language follows the system UI language
+by default; it can be forced with the `Language` key in the config file
+(`%APPDATA%\rusty-twinkle-tray.ini`):
+
+```ini
+[General]
+Language=zh-CN   ; auto (default), en-US or zh-CN
+```
+
 ## Precompiled Binaries
 | [**DOWNLOAD**](https://github.com/sidit77/rusty-twinkle-tray/releases/latest) |
 |-----------------------------------------------------------------------------------------------------------------|

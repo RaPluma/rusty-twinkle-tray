@@ -2,6 +2,7 @@
 
 mod backend;
 mod config;
+mod localization;
 mod monitors;
 pub mod runtime;
 mod theme;
@@ -82,6 +83,8 @@ fn run() -> Result<()> {
     let _xaml_manager = WindowsXamlManager::InitializeForCurrentThread()?;
 
     let config = Arc::new(Mutex::new(Config::restore()?));
+    let language = config.lock_no_poison().language.clone();
+    localization::init(&language);
 
     let (wnd_sender, wnd_receiver) = loole::unbounded();
     let mut controller = MonitorController::new(wnd_sender.clone(), config.clone());
@@ -93,7 +96,7 @@ fn run() -> Result<()> {
         .map_or_else(ColorSet::dark, |system_settings| ColorSet::system(&system_settings, &ui_settings));
 
     let tray = TrayIconBuilder::new()
-        .with_tooltip("Change Brightness")
+        .with_tooltip(localization::strings().change_brightness)
         .with_icon(Icon::from_resource(
             if colors.theme == ElementTheme::Light {
                 BRIGHTNESS_LIGHT_ICON
@@ -102,7 +105,7 @@ fn run() -> Result<()> {
             },
             None
         )?)
-        .with_menu(Menu::new([MenuItem::button("Quit", CustomEvent::Quit)]))
+        .with_menu(Menu::new([MenuItem::button(localization::strings().quit, CustomEvent::Quit)]))
         .build(cloned!([wnd_sender] move |event| wnd_sender.filter_send_ignore(match event {
             TrayEvent::Tray(ClickType::Left) => Some(CustomEvent::Show),
             TrayEvent::Menu(e) => Some(e),
@@ -291,7 +294,7 @@ fn run() -> Result<()> {
                             Ok(r) => scroll_callback = Some(r),
                             Err(err) => {
                                 error!("{:?}", err);
-                                panic::show_msg(format_args!("Failed to enable icon scroll:\n{}", err.message()));
+                                panic::show_msg(format_args!("{}:\n{}", localization::strings().failed_enable_icon_scroll, err.message()));
                             }
                         }
                     }
@@ -301,7 +304,8 @@ fn run() -> Result<()> {
                             Ok(hk) => hotkey_inc = Box::pin(hk.map(move |_| CustomEvent::ChangeGeneralBrightness(factor))),
                             Err(err) => {
                                 error!("{:?}", err);
-                                panic::show_msg(format_args!("Failed to register hotkey {}:\n{}",
+                                panic::show_msg(format_args!("{} {}:\n{}",
+                                                             localization::strings().failed_register_hotkey,
                                                              lock.brightness_increase_hotkey.display(true),
                                                              err.message()));
                             }
@@ -310,7 +314,8 @@ fn run() -> Result<()> {
                             Ok(hk) => hotkey_dec = Box::pin(hk.map(move |_| CustomEvent::ChangeGeneralBrightness(-factor))),
                             Err(err) => {
                                 error!("{:?}", err);
-                                panic::show_msg(format_args!("Failed to register hotkey {}:\n{}",
+                                panic::show_msg(format_args!("{} {}:\n{}",
+                                                             localization::strings().failed_register_hotkey,
                                                              lock.brightness_decrease_hotkey.display(true),
                                                              err.message()));
                             }
