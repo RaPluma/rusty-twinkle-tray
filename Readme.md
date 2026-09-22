@@ -1,6 +1,7 @@
 # Rusty Twinkle Tray
 
 A small utility for quickly adjusting the brightness of external monitors using the DDC/CI protocol.
+The built in laptop panel is supported as well (see [Internal displays](#internal-displays)).
 
 Rusty Twinkle Tray is a work-in-progress rewrite of Twinkle Tray in Rust. A central goal of this rewrite is to start much faster so that monitor brightness can be adjusted as soon as possible after logging in.
 
@@ -11,12 +12,26 @@ Rusty Twinkle Tray is a work-in-progress rewrite of Twinkle Tray in Rust. A cent
 - Can automatically restore the last set brightness after¹:
   - Changing display settings
   - Waking up from sleep
+- Can also control the brightness of the built in laptop panel
 - Small (~900kb) standalone executable
 - Built using native OS controls instead of electron
 - As inactive as possible when not in use
 - Minimal dependencies
 
 ¹*Many monitors tend to "forget" settings set over DDC/CI after temporarily losing power*
+
+## Internal displays
+Laptop panels don't speak DDC/CI: Windows neither reports a friendly name for them nor
+does `GetPhysicalMonitorsFromHMONITOR` give a usable physical monitor handle. They are
+therefore controlled through the `\\.\LCD` device with the
+`IOCTL_VIDEO_QUERY_SUPPORTED_BRIGHTNESS`, `IOCTL_VIDEO_QUERY_DISPLAY_BRIGHTNESS` and
+`IOCTL_VIDEO_SET_DISPLAY_BRIGHTNESS` ioctls (the same mechanism the Windows mobility
+center uses), which reports brightness on the usual 0 - 100 scale.
+
+A monitor is treated as an internal display when it has no friendly name *and* the
+internal brightness interface is available, so machines without such a panel are
+unaffected. If the display driver doesn't expose the interface (some hybrid GPU setups
+hide it), the panel simply keeps behaving like before.
 
 ## Precompiled Binaries
 | [**DOWNLOAD**](https://github.com/sidit77/rusty-twinkle-tray/releases/latest) |
@@ -52,7 +67,7 @@ Unfortunately, the Microsoft-provided [`windows-rs` crate](https://microsoft.git
 - [ ] Fluent design for Windows 11+
 - [x] Respect Dark/Light system setting
 - [x] Attempt to restore brightness after waking up from sleep
-- [ ] Support integrated laptop screens connected over I2C
+- [x] Support integrated laptop screens connected over I2C
 - [x] Support monitor hot plugging
 - [ ] Handle auto-hiding taskbar
 - [ ] Improve themes

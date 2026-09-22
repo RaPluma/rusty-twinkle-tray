@@ -70,11 +70,14 @@ impl MonitorController {
                         }
                         BackendCommand::RefreshMonitors => {
                             trace!("Refreshing monitor list");
-                            let mut current_monitors = Monitor::find_all()
+                            let current_monitors = Monitor::find_all()
                                 .map_err(|err| log::warn!("Failed to enumerate monitors: {err}"))
                                 .unwrap_or_default();
-                            debug!("Skipping over unnamed monitors as they are likely integrated displays");
-                            current_monitors.retain(|m| !m.name().is_empty());
+                            // NOTE: monitors without a friendly name used to be dropped here
+                            // because they were assumed to be integrated displays. Laptop
+                            // panels are now detected and controlled through the internal
+                            // display brightness interface instead, so nothing is filtered out.
+                            debug!("Found monitors: {:?}", current_monitors.iter().map(|m| (m.name(), m.is_internal())).collect::<Vec<_>>());
 
                             let old_monitors = take(&mut monitor_map).into_keys().collect::<BTreeSet<_>>();
 

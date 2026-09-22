@@ -45,8 +45,15 @@ impl From<&str> for MonitorPath {
 pub struct Monitor {
     name: String,
     path: MonitorPath,
-    hmonitor: HMONITOR
+    hmonitor: HMONITOR,
+    /// True for laptop panels: they have no DDC/CI support and Windows doesn't
+    /// report a friendly name for them, so they are driven through the internal
+    /// display brightness interface instead.
+    internal: bool
 }
+
+/// Shown instead of the (missing) friendly name of an internal display.
+pub const INTERNAL_DISPLAY_NAME: &str = "Internal Display";
 
 impl Monitor {
     pub fn find_all() -> Result<Vec<Monitor>> {
@@ -58,7 +65,9 @@ impl Monitor {
                 let (name, path) = get_name_and_path(&display)?;
                 let gdi = get_gdi_name(&display)?;
                 let hmonitor = monitors.iter().find(|(n, _)| n == &gdi).some()?.1;
-                Ok(Monitor { name, path, hmonitor })
+                let internal = name.trim().is_empty() && internal::InternalBrightness::is_supported();
+                let name = if internal { INTERNAL_DISPLAY_NAME.to_string() } else { name };
+                Ok(Monitor { name, path, hmonitor, internal })
             })
             .filter(|r| r
                 .as_ref()
@@ -74,13 +83,27 @@ impl Monitor {
         &self.path
     }
 
+    /// True if this is the built in laptop panel.
+    pub fn is_internal(&self) -> bool {
+        self.internal
+    }
+
     pub fn open(&self) -> Result<MonitorConnection> {
+        if self.internal {
+            log::debug!("Opening the internal display brightness interface for '{}'", self.name);
+            return Ok(MonitorConnection::internal(internal::InternalBrightness::open()?));
+        }
         MonitorConnection::open(self.hmonitor)
     }
 }
 
 pub struct MonitorConnection {
-    handle: HANDLE
+    backend: ConnectionBackend
+}
+
+enum ConnectionBackend {
+    Ddc { handle: HANDLE },
+    Internal(internal::InternalBrightness)
 }
 
 impl MonitorConnection {
@@ -96,8 +119,14 @@ impl MonitorConnection {
         unsafe { GetPhysicalMonitorsFromHMONITOR(monitor, std::slice::from_mut(&mut physical_monitor))? };
 
         Ok(Self {
-            handle: physical_monitor.hPhysicalMonitor
+            backend: ConnectionBackend::Ddc { handle: physical_monitor.hPhysicalMonitor }
         })
+    }
+
+    fn internal(brightness: internal::InternalBrightness) -> Self {
+        Self {
+            backend: ConnectionBackend::Internal(brightness)
+        }
     }
 
     /*
@@ -112,21 +141,37 @@ impl MonitorConnection {
      */
 
     pub fn get_brightness(&self) -> Result<(u32, RangeInclusive<u32>)> {
-        let mut min = 0;
-        let mut cur = 0;
-        let mut max = 0;
-        unsafe { BOOL(GetMonitorBrightness(self.handle, &mut min, &mut cur, &mut max)).ok()? };
-        Ok((cur, min..=max))
+        match &self.backend {
+            ConnectionBackend::Ddc { handle } => {
+                let mut min = 0;
+                let mut cur = 0;
+                let mut max = 0;
+                unsafe { BOOL(GetMonitorBrightness(*handle, &mut min, &mut cur, &mut max)).ok()? };
+                Ok((cur, min..=max))
+            }
+            ConnectionBackend::Internal(brightness) => brightness.get_brightness()
+        }
     }
 
     pub fn set_brightness(&self, new: u32) -> Result<()> {
-        unsafe { BOOL(SetMonitorBrightness(self.handle, new)).ok()? };
-        Ok(())
+        match &self.backend {
+            ConnectionBackend::Ddc { handle } => {
+                unsafe { BOOL(SetMonitorBrightness(*handle, new)).ok()? };
+                Ok(())
+            }
+            ConnectionBackend::Internal(brightness) => brightness.set_brightness(new)
+        }
     }
     
     pub fn save_settings(&self) -> Result<()> {
-        unsafe { BOOL(SaveCurrentMonitorSettings(self.handle)).ok()? };
-        Ok(())
+        match &self.backend {
+            ConnectionBackend::Ddc { handle } => {
+                unsafe { BOOL(SaveCurrentMonitorSettings(*handle)).ok()? };
+                Ok(())
+            }
+            // The internal display keeps its brightness on its own.
+            ConnectionBackend::Internal(_) => Ok(())
+        }
     }
     
 }
@@ -148,11 +193,167 @@ mod tests {
         }
         Ok(())
     }
+
+    /// Reads the brightness of the built in panel. Non destructive on purpose.
+    #[test]
+    fn internal_display() -> Result<()> {
+        for monitor in Monitor::find_all()? {
+            if monitor.is_internal() {
+                let conn = monitor.open()?;
+                let (current, range) = conn.get_brightness()?;
+                println!("{}: brightness {} / {}-{}", monitor.name(), current, range.start(), range.end());
+                return Ok(());
+            }
+        }
+        println!("No internal display detected");
+        Ok(())
+    }
 }
 
 impl Drop for MonitorConnection {
     fn drop(&mut self) {
-        unsafe { DestroyPhysicalMonitor(self.handle).unwrap_or_else(|err| log::warn!("Failed to release physical monitor: {err}")) }
+        if let ConnectionBackend::Ddc { handle } = self.backend {
+            unsafe { DestroyPhysicalMonitor(handle).unwrap_or_else(|err| log::warn!("Failed to release physical monitor: {err}")) }
+        }
+    }
+}
+
+/// Brightness control for the built in laptop panel.
+///
+/// Internal panels don't speak DDC/CI, so they are controlled through the
+/// `\\.\LCD` device with the `IOCTL_VIDEO_*_BRIGHTNESS` ioctls (the same
+/// mechanism the Windows mobility center uses). The brightness is reported on
+/// a 0 - 100 scale, just like DDC.
+mod internal {
+    use std::ops::RangeInclusive;
+
+    use windows::core::{w, Error};
+    use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE};
+    use windows::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING
+    };
+    use windows::Win32::System::IO::DeviceIoControl;
+
+    use crate::utils::error::Result;
+
+    // CTL_CODE(FILE_DEVICE_VIDEO, ...) from ntddvdeo.h
+    const IOCTL_VIDEO_QUERY_SUPPORTED_BRIGHTNESS: u32 = 0x0023_0494;
+    const IOCTL_VIDEO_QUERY_DISPLAY_BRIGHTNESS: u32 = 0x0023_0498;
+    const IOCTL_VIDEO_SET_DISPLAY_BRIGHTNESS: u32 = 0x0023_049C;
+
+    /// Max amount of supported brightness levels reported by the display driver.
+    const MAX_LEVELS: usize = 256;
+
+    pub struct InternalBrightness {
+        handle: HANDLE
+    }
+
+    impl InternalBrightness {
+        /// Cheap check whether this machine exposes the internal brightness interface.
+        pub fn is_supported() -> bool {
+            Self::open().is_ok()
+        }
+
+        pub fn open() -> Result<Self> {
+            let handle = unsafe {
+                CreateFileW(
+                    w!("\\\\.\\LCD"),
+                    (GENERIC_READ | GENERIC_WRITE).0,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    None,
+                    OPEN_EXISTING,
+                    FILE_ATTRIBUTE_NORMAL,
+                    None
+                )
+            }?;
+
+            if handle == INVALID_HANDLE_VALUE || handle.is_invalid() {
+                return Err(Error::from_win32().into());
+            }
+
+            let brightness = Self { handle };
+            // Make sure the device really supports brightness control before
+            // handing it out, otherwise the caller falls back to DDC.
+            brightness.supported_levels()?;
+            Ok(brightness)
+        }
+
+        fn supported_levels(&self) -> Result<u32> {
+            let mut levels = [0u8; MAX_LEVELS];
+            let mut returned = 0;
+            unsafe {
+                DeviceIoControl(
+                    self.handle,
+                    IOCTL_VIDEO_QUERY_SUPPORTED_BRIGHTNESS,
+                    None,
+                    0,
+                    Some(levels.as_mut_ptr() as _),
+                    levels.len() as u32,
+                    Some(&mut returned),
+                    None
+                )
+            }?;
+            if returned == 0 {
+                return Err("The display driver does not report any brightness levels".into());
+            }
+            Ok(returned)
+        }
+
+        pub fn get_brightness(&self) -> Result<(u32, RangeInclusive<u32>)> {
+            let mut out = [0u8; 3]; // DISPLAY_BRIGHTNESS { policy, ac, dc }
+            let mut returned = 0;
+            unsafe {
+                DeviceIoControl(
+                    self.handle,
+                    IOCTL_VIDEO_QUERY_DISPLAY_BRIGHTNESS,
+                    None,
+                    0,
+                    Some(out.as_mut_ptr() as _),
+                    out.len() as u32,
+                    Some(&mut returned),
+                    None
+                )
+            }?;
+
+            let max = self.supported_levels()?.saturating_sub(1);
+            // policy 2 = DC, everything else = AC (see DISPLAY_BRIGHTNESS)
+            let current = if out[0] == 2 { out[2] } else { out[1] };
+            let current = if current == 0 && out[1] != 0 { out[1] } else if current == 0 { out[2] } else { current };
+            Ok((current.min(max as u8) as u32, 0..=max))
+        }
+
+        pub fn set_brightness(&self, value: u32) -> Result<()> {
+            let max = self.supported_levels()?.saturating_sub(1);
+            let value = value.min(max) as u8;
+
+            let mut input = [0u8; 3];
+            input[0] = 2; // update the brightness for both AC and DC
+            input[1] = value;
+            input[2] = value;
+
+            let mut returned = 0;
+            unsafe {
+                DeviceIoControl(
+                    self.handle,
+                    IOCTL_VIDEO_SET_DISPLAY_BRIGHTNESS,
+                    Some(input.as_ptr() as _),
+                    input.len() as u32,
+                    None,
+                    0,
+                    Some(&mut returned),
+                    None
+                )
+            }?;
+            Ok(())
+        }
+    }
+
+    impl Drop for InternalBrightness {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = CloseHandle(self.handle);
+            }
+        }
     }
 }
 
