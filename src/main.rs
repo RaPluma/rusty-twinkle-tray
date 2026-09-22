@@ -36,7 +36,7 @@ use crate::runtime::{FutureStream, Timer};
 use crate::theme::{ColorSet, SystemSettings};
 pub use crate::utils::error::Result;
 use crate::utils::extensions::{ChannelExt, MutexExt};
-use crate::utils::{logger, panic};
+use crate::utils::{logger, panic, single_instance};
 use crate::views::{BrightnessFlyout, ProxyWindow, SettingsWindow};
 use crate::watchers::{EventWatcher, PowerEvent};
 use windowing::hotkey::HotKey;
@@ -77,6 +77,13 @@ fn run() -> Result<()> {
         return Ok(());
     }
     let settings_mode = std::env::args().any(|arg| arg == "--settings-mode");
+
+    // Only a single instance may run: otherwise every launch adds another tray
+    // icon and another set of threads controlling the same monitors.
+    let Some(_single_instance) = single_instance::acquire()? else {
+        warn!("Another instance of Rusty Twinkle Tray is already running, exiting");
+        return Ok(());
+    };
 
     unsafe { RoInitialize(RO_INIT_SINGLETHREADED)? };
 

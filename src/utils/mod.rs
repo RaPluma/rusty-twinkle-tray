@@ -4,6 +4,7 @@ pub mod extensions;
 pub mod logger;
 pub mod ordered_map;
 pub mod panic;
+pub mod single_instance;
 pub mod string;
 pub mod winrt;
 

@@ -13,6 +13,7 @@ Rusty Twinkle Tray is a work-in-progress rewrite of Twinkle Tray in Rust. A cent
   - Changing display settings
   - Waking up from sleep
 - Can also control the brightness of the built in laptop panel
+- Only one instance runs at a time (a second launch exits immediately)
 - Small (~900kb) standalone executable
 - Built using native OS controls instead of electron
 - As inactive as possible when not in use
