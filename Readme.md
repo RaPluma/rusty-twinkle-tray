@@ -44,8 +44,13 @@ Language=zh-CN   ; auto (default), en-US or zh-CN
 ```
 
 ## Precompiled Binaries
-| [**DOWNLOAD**](https://github.com/sidit77/rusty-twinkle-tray/releases/latest) |
+
+| [**DOWNLOAD**](https://github.com/RaPluma/rusty-twinkle-tray/releases/latest) |
 |-----------------------------------------------------------------------------------------------------------------|
+
+> This fork ships its own builds: [latest release](https://github.com/RaPluma/rusty-twinkle-tray/releases/latest)
+> (adds the built in laptop panel support and an English/Chinese UI).
+> The upstream project lives at [sidit77/rusty-twinkle-tray](https://github.com/sidit77/rusty-twinkle-tray).
 
 ## Building
 This program is written in [Rust](https://www.rust-lang.org/) and requires a working Rust installation if you want to compile it yourself.
