@@ -33,6 +33,11 @@ internal brightness interface is available, so machines without such a panel are
 unaffected. If the display driver doesn't expose the interface (some hybrid GPU setups
 hide it), the panel simply keeps behaving like before.
 
+Internal panels are listed with the model reported by the display itself, because Windows
+only knows the generic "Integrated Monitor" for them: the monitor name from the EDID when
+it provides one, otherwise the EDID manufacturer + product code (e.g. `BOE0B40`). You can
+still rename it in the settings window.
+
 ## Language
 The UI is available in English and Chinese. The language follows the system UI language
 by default; it can be forced with the `Language` key in the config file

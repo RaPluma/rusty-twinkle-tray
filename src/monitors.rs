@@ -63,7 +63,9 @@ impl Monitor {
                 let gdi = get_gdi_name(&display)?;
                 let hmonitor = monitors.iter().find(|(n, _)| n == &gdi).some()?.1;
                 let internal = name.trim().is_empty() && internal::InternalBrightness::is_supported();
-                let name = if internal { crate::localization::strings().internal_display.to_string() } else { name };
+                // Internal panels have no friendly name, so fall back to the real
+                // model reported by the display itself (EDID / hardware id).
+                let name = if name.trim().is_empty() { display_name::default_name(&path) } else { name };
                 Ok(Monitor { name, path, hmonitor, internal })
             })
             .filter(|r| r
@@ -191,16 +193,19 @@ mod tests {
         Ok(())
     }
 
-    /// Reads the brightness of the built in panel. Non destructive on purpose.
+    /// Lists the detected monitors and reads the brightness of the built in
+    /// panel. Non destructive on purpose.
     #[test]
     fn internal_display() -> Result<()> {
-        for monitor in Monitor::find_all()? {
-            if monitor.is_internal() {
-                let conn = monitor.open()?;
-                let (current, range) = conn.get_brightness()?;
-                println!("{}: brightness {} / {}-{}", monitor.name(), current, range.start(), range.end());
-                return Ok(());
-            }
+        let monitors = Monitor::find_all()?;
+        for monitor in &monitors {
+            println!("{}{}", monitor.name(), if monitor.is_internal() { " (internal)" } else { "" });
+        }
+        for monitor in monitors.iter().filter(|m| m.is_internal()) {
+            let conn = monitor.open()?;
+            let (current, range) = conn.get_brightness()?;
+            println!("{}: brightness {} / {}-{}", monitor.name(), current, range.start(), range.end());
+            return Ok(());
         }
         println!("No internal display detected");
         Ok(())
@@ -212,6 +217,121 @@ impl Drop for MonitorConnection {
         if let ConnectionBackend::Ddc { handle } = self.backend {
             unsafe { DestroyPhysicalMonitor(handle).unwrap_or_else(|err| log::warn!("Failed to release physical monitor: {err}")) }
         }
+    }
+}
+
+/// Naming of displays that don't report a friendly name (which is the case for
+/// almost every internal laptop panel: Windows only gives them the generic
+/// "Integrated Monitor").
+///
+/// The real model is taken from the display itself, preferring
+/// 1. the monitor name descriptor of the EDID (e.g. "NE156QUM-N6A"),
+/// 2. the EDID manufacturer + product code from the hardware id (e.g. "BOE0B40"),
+/// 3. a localized generic name as the last resort.
+mod display_name {
+    use std::fmt::Write;
+
+    use windows::core::PCWSTR;
+    use windows::Win32::System::Registry::{RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_LOCAL_MACHINE, KEY_READ, REG_BINARY, REG_VALUE_TYPE};
+
+    use super::MonitorPath;
+
+    pub fn default_name(path: &MonitorPath) -> String {
+        match split_display_path(path.as_str()) {
+            Some((hardware_id, instance)) => edid_monitor_name(&instance).unwrap_or_else(|| hardware_id.to_string()),
+            None => crate::localization::strings().internal_display.to_string()
+        }
+    }
+
+    /// `\\?\DISPLAY#BOE0B40#5&1a317b2f&1&UID4355#{e6f07b5f-...}`
+    ///   -> `("BOE0B40", "DISPLAY\\BOE0B40\\5&1a317b2f&1&UID4355")`
+    ///
+    /// The second value is the path of the device below
+    /// `HKLM\SYSTEM\CurrentControlSet\Enum`, where Windows stores the EDID.
+    fn split_display_path(path: &str) -> Option<(&str, String)> {
+        let rest = path.strip_prefix(r"\\?\")?;
+        let mut parts = rest.splitn(4, '#');
+        let device = parts.next()?;
+        let hardware_id = parts.next()?;
+        let instance = parts.next()?;
+        if device != "DISPLAY" || hardware_id.is_empty() || instance.is_empty() {
+            return None;
+        }
+        let mut instance_path = String::with_capacity(device.len() + hardware_id.len() + instance.len() + 2);
+        let _ = write!(instance_path, "{device}\\{hardware_id}\\{instance}");
+        Some((hardware_id, instance_path))
+    }
+
+    /// Reads the EDID of the monitor and returns its name descriptor (0xFC).
+    fn edid_monitor_name(instance_path: &str) -> Option<String> {
+        let mut sub_key = Vec::new();
+        for part in ["SYSTEM", "CurrentControlSet", "Enum"] {
+            sub_key.extend(part.encode_utf16());
+            sub_key.push('\\' as u16);
+        }
+        sub_key.extend(instance_path.encode_utf16());
+        sub_key.extend(r"\Device Parameters".encode_utf16());
+        sub_key.push(0);
+
+        let mut key = HKEY::default();
+        match unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, PCWSTR(sub_key.as_ptr()), 0, KEY_READ, &mut key) } {
+            Ok(()) => {}
+            Err(err) => {
+                log::trace!("No registry entry for {instance_path}: {err}");
+                return None;
+            }
+        }
+
+        let edid = read_edid(key);
+        unsafe {
+            let _ = RegCloseKey(key);
+        }
+
+        let edid = edid?;
+        let name = find_name_descriptor(&edid);
+        log::debug!("EDID name of {instance_path}: {:?}", name);
+        name
+    }
+
+    fn read_edid(key: HKEY) -> Option<Vec<u8>> {
+        let mut buffer = [0u8; 256];
+        let mut size = buffer.len() as u32;
+        let mut ty = REG_VALUE_TYPE::default();
+        let edid = b"EDID\0".iter().map(|b| *b as u16).collect::<Vec<_>>();
+
+        match unsafe { RegQueryValueExW(key, PCWSTR(edid.as_ptr()), None, Some(&mut ty), Some(buffer.as_mut_ptr()), Some(&mut size)) } {
+            Ok(()) if matches!(ty, REG_BINARY) && (size as usize) <= buffer.len() => Some(buffer[..size as usize].to_vec()),
+            Ok(()) => None,
+            Err(err) => {
+                log::trace!("Failed to read the EDID: {err}");
+                None
+            }
+        }
+    }
+
+    /// Looks for the monitor name descriptor (`00 00 00 FC 00 "NAME"`) in the
+    /// four 18 byte descriptor blocks of the EDID.
+    fn find_name_descriptor(edid: &[u8]) -> Option<String> {
+        if edid.len() < 128 {
+            return None;
+        }
+
+        for offset in [54usize, 72, 90, 108] {
+            let descriptor = &edid[offset..offset + 18];
+            if descriptor[..5] != [0, 0, 0, 0xFC, 0] {
+                continue;
+            }
+            let name = descriptor[5..]
+                .iter()
+                .take_while(|b| **b != 0x0A && **b != 0)
+                .map(|b| *b as char)
+                .collect::<String>();
+            let name = name.trim().to_string();
+            if !name.is_empty() {
+                return Some(name);
+            }
+        }
+        None
     }
 }
 
